@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoML+ Web Interface</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background: linear-gradient(135deg, #6b48ff, #00c6ff);
+      min-height: 100vh;
+    }
+    .checkbox-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const App = () => {
+      const [file, setFile] = useState(null);
+      const [targetColumn, setTargetColumn] = useState('');
+      const [taskType, setTaskType] = useState('');
+      const [visualizations, setVisualizations] = useState([]);
+      const [result, setResult] = useState('');
+      const [reportUrl, setReportUrl] = useState('');
+
+      const visOptions = {
+        CLASSIFICATION: [
+          { value: '1', label: 'Correlation Heatmap' },
+          { value: '2', label: 'Confusion Matrix' },
+          { value: '3', label: 'Pairplot' },
+        ],
+        REGRESSION: [
+          { value: '1', label: 'Correlation Heatmap' },
+          { value: '2', label: 'Actual vs Predicted' },
+          { value: '3', label: 'Pairplot' },
+        ],
+        CLUSTERING: [
+          { value: '1', label: 'Correlation Heatmap' },
+          { value: '2', label: 'Cluster Visualization' },
+        ],
+      };
+
+      const handleFileChange = (e) => {
+        setFile(e.target.files[0]);
+        detectTaskType(e.target.files[0], targetColumn);
+      };
+
+      const handleTargetChange = (e) => {
+        setTargetColumn(e.target.value);
+        if (file) {
+          detectTaskType(file, e.target.value);
+        }
+      };
+
+      const detectTaskType = async (file, target) => {
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('targetColumn', target);
+
+        try {
+          const response = await fetch('http://localhost:5000/api/detect-task', {
+            method: 'POST',
+            body: formData,
+          });
+          const data = await response.json();
+          if (response.ok) {
+            setTaskType(data.task_type);
+            setVisualizations([]);
+          } else {
+            setTaskType('');
+            setResult(data.error || 'Error detecting task type.');
+          }
+        } catch (error) {
+          console.error('Detect task error:', error);
+          setTaskType('');
+          setResult('Error connecting to the server.');
+        }
+      };
+
+      const handleVisChange = (e) => {
+        const { value, checked } = e.target;
+        setVisualizations(prev => 
+          checked ? [...prev, value] : prev.filter(v => v !== value)
+        );
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!file) {
+          setResult('Please upload a CSV file.');
+          return;
+        }
+
+        const formData = new FormData();
+        const fileCopy = new File([file], file.name, { type: file.type });
+        formData.append('file', fileCopy);
+        formData.append('targetColumn', targetColumn);
+        formData.append('visualizations', JSON.stringify(visualizations));
+
+        try {
+          const response = await fetch('http://localhost:5000/api/run-automl', {
+            method: 'POST',
+            body: formData,
+          });
+          console.log('Response status:', response.status);
+          console.log('Response ok:', response.ok);
+          const data = await response.json();
+          console.log('Response data:', data);
+          if (response.ok) {
+            setResult(data.message);
+            setReportUrl('http://localhost:5000/download-report');
+          } else {
+            setResult(data.error || 'Error processing the request.');
+          }
+        } catch (error) {
+          console.error('Fetch error:', error);
+          setResult('Error connecting to the server.');
+        }
+      };
+
+      const handleDownload = async () => {
+        try {
+          const response = await fetch(reportUrl);
+          if (!response.ok) {
+            throw new Error('Failed to download report');
+          }
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'AutoML_Report.pdf';
+          a.click();
+          window.URL.revokeObjectURL(url);
+        } catch (error) {
+          console.error('Download error:', error);
+          setResult('Error downloading the report.');
+        }
+      };
+
+      const getSelectedVisLabels = () => {
+        if (!taskType) return [];
+        return visualizations.map(val => 
+          visOptions[taskType].find(opt => opt.value === val)?.label || ''
+        ).filter(label => label);
+      };
+
+      return (
+        <div className="container mx-auto p-6 flex items-center justify-center min-h-screen">
+          <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md transform transition-all hover:scale-105 duration-300">
+            <h1 className="text-3xl font-bold text-purple-800 mb-6 text-center">AutoML+ Web Interface</h1>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Upload CSV File</label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleFileChange}
+                  className="mt-1 block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-100 file:text-purple-700 hover:file:bg-purple-200"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Target Column (optional)</label>
+                <input
+                  type="text"
+                  value={targetColumn}
+                  onChange={handleTargetChange}
+                  placeholder="Leave blank for unsupervised tasks"
+                  className="mt-1 block w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              {taskType && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Visualizations (Task Type: {taskType})</label>
+                  <div className="checkbox-group">
+                    {visOptions[taskType].map(option => (
+                      <label key={option.value} className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          value={option.value}
+                          checked={visualizations.includes(option.value)}
+                          onChange={handleVisChange}
+                          className="form-checkbox h-5 w-5 text-blue-600"
+                        />
+                        <span>{option.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {visualizations.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-sm text-gray-600">Selected Visualizations:</p>
+                      <ul className="list-disc list-inside text-sm text-gray-800">
+                        {getSelectedVisLabels().map((label, index) => (
+                          <li key={index}>{label}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+              <button
+                type="submit"
+                className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white p-3 rounded-lg hover:from-blue-600 hover:to-purple-700 transition duration-300"
+              >
+                Generate Report
+              </button>
+            </form>
+            {result && <p className="mt-6 text-center text-gray-800 font-medium">{result}</p>}
+            {reportUrl && (
+              <div className="mt-4 text-center">
+                <button
+                  onClick={handleDownload}
+                  className="inline-block bg-green-500 text-white p-2 rounded-lg hover:bg-green-600 transition duration-300"
+                >
+                  Download Report
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>

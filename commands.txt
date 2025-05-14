@@ -1,0 +1,8 @@
+terminal 1:
+python main.py
+
+terminal 2:
+python -m http.server 8000
+
+browser
+http://localhost:8000/index.html
